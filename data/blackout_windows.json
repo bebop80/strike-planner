@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "evento": "Finestra Istituzionale Straordinaria",
+    "data_evento": "2026-11-22",
+    "blocco_inizio": "2026-11-19",
+    "blocco_fine": "2026-11-25",
+    "tipo": "nazionale",
+    "riferimento": "Art. 8 Del. 01/92 (-3/+3 gg)"
+  }
+]
