@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EasyJet RSA — Strike Calendar Advisor</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-container">
+    <header>
+      <div class="header-content">
+        <h1>EasyJet RSA — Strike Calendar Advisor</h1>
+        <p class="subtitle">Verifica legale e conformità scioperi: Delibera CGSSE 01/92, L. 146/90 e Cruscotto MIT</p>
+      </div>
+      <div id="sync-status" class="sync-status">Caricamento dati...</div>
+    </header>
+
+    <section class="controls-panel">
+      <div class="control-group">
+        <label for="proclamation-date">Data prevista proclamazione:</label>
+        <input type="date" id="proclamation-date" />
+      </div>
+
+      <div class="control-group">
+        <label for="action-type">Azione di Sciopero:</label>
+        <select id="action-type">
+          <option value="first">1ª Azione di sciopero (max 4 ore)</option>
+          <option value="subsequent">Azione successiva (fino a 24 ore)</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label for="month-select">Mese da verificare:</label>
+        <input type="month" id="month-select" />
+      </div>
+
+      <button id="btn-recompute" class="btn-primary">Verifica Calendario</button>
+    </section>
+
+    <div class="legend">
+      <span class="legend-item"><span class="badge badge-green"></span> Data Ammissibile (Verde)</span>
+      <span class="legend-item"><span class="badge badge-yellow"></span> Attenzione / Concomitanza Intermodale</span>
+      <span class="legend-item"><span class="badge badge-red"></span> Bloccata (Franchigia / Preavviso / Rarefazione 10 gg)</span>
+    </div>
+
+    <main class="main-layout">
+      <section class="calendar-wrapper">
+        <div id="calendar" class="calendar-grid"></div>
+      </section>
+
+      <section class="details-panel" id="details-panel">
+        <h2>Scheda di Conformità Legale</h2>
+        <p class="placeholder-text">Seleziona una data sul calendario a sinistra per analizzare tutti i vincoli normativi.</p>
+        <div id="details-content" style="display: none;"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

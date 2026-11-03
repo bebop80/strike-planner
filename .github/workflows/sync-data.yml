@@ -1,0 +1,38 @@
+name: Aggiornamento Dati Scioperi e Franchigie
+
+on:
+  schedule:
+    # Esecuzione alle 05:00 UTC tutti i giorni
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+jobs:
+  run-sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Scarica repository
+        uses: actions/checkout@v4
+
+      - name: Configura Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Installa dipendenze
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Esegui Pipeline Sincronizzazione
+        run: python scripts/sync_pipeline.py
+
+      - name: Committa e Pusha aggiornamenti
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/scioperi.json data/blackout_windows.json
+          git diff --staged --quiet || (git commit -m "Auto-sync database MIT/CGSSE [skip ci]" && git push)
