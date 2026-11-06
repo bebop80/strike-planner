@@ -17,17 +17,38 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 }
 
+# Parole chiave estese per catturare tutti gli scioperi del settore aereo/assistenza/aeroporti
+AEREO_KEYWORDS = [
+    "aereo", "aerea", "aerei", "aviazione", "enav", 
+    "assistenza al volo", "navigazione aerea", "aeroportual", 
+    "aeroporto", "handling", "vettore", "easyjet", "piloti", 
+    "assistenti di volo", "cgsse", "enac"
+]
+
+# Parole chiave per la concomitanza intermodale (Art. 12)
+INTERMODAL_KEYWORDS = [
+    "ferrovi", "treni", "trenitalia", "italo", 
+    "tpl", "autoferro", "trasporto pubblico locale", 
+    "marittim", "traghetti"
+]
+
 def parse_date(date_str):
     if not date_str:
         return None
+    # Intercetta formati DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY o YYYY-MM-DD
     match = re.search(r"(\d{2})[/.-](\d{2})[/.-](\d{4})", date_str)
     if match:
         day, month, year = match.groups()
         return f"{year}-{month}-{day}"
+    
+    match_iso = re.search(r"(\d{4})[/.-](\d{2})[/.-](\d{2})", date_str)
+    if match_iso:
+        year, month, day = match_iso.groups()
+        return f"{year}-{month}-{day}"
     return None
 
 def fetch_mit_strikes():
-    print("Avvio scraping Cruscotto MIT...")
+    print("Avvio interrogazione Cruscotto MIT...")
     strikes = []
     try:
         resp = requests.get(MIT_URL, headers=HEADERS, timeout=25)
@@ -35,7 +56,7 @@ def fetch_mit_strikes():
         soup = BeautifulSoup(resp.text, "html.parser")
         table = soup.find("table")
         if not table:
-            print("Tabella MIT non individuata.")
+            print("Nessuna tabella trovata sulla pagina MIT.")
             return strikes
 
         rows = table.find_all("tr")[1:]
@@ -46,6 +67,7 @@ def fetch_mit_strikes():
                 raw_end = cols[1]
                 settore = cols[2].lower()
                 ambito = cols[3]
+                ambito_lower = ambito.lower()
                 sindacati = cols[4]
 
                 p_start = parse_date(raw_start)
@@ -53,7 +75,10 @@ def fetch_mit_strikes():
                 if not p_start:
                     continue
 
-                if "aereo" in settore:
+                # Controllo prioritario comparto AEREO (sia sul settore che sul testo dell'ambito aziendale)
+                is_aereo = any(k in settore for k in AEREO_KEYWORDS) or any(k in ambito_lower for k in AEREO_KEYWORDS)
+
+                if is_aereo:
                     strikes.append({
                         "date": p_start,
                         "endDate": p_end,
@@ -62,7 +87,7 @@ def fetch_mit_strikes():
                         "sindacato": sindacati,
                         "fonte": "MIT"
                     })
-                elif any(k in settore for k in ["ferroviari", "tpl", "marittimo", "trasporto"]):
+                elif any(k in settore for k in INTERMODAL_KEYWORDS) or any(k in ambito_lower for k in INTERMODAL_KEYWORDS):
                     strikes.append({
                         "date": p_start,
                         "endDate": p_end,
@@ -71,21 +96,20 @@ def fetch_mit_strikes():
                         "sindacato": sindacati,
                         "fonte": "MIT"
                     })
-        print(f"Estratti {len(strikes)} scioperi dal MIT.")
+        print(f"Estratti {len(strikes)} scioperi rilevanti dal MIT.")
     except Exception as e:
-        print(f"Errore recupero MIT: {e}")
+        print(f"Errore durante la lettura dal MIT: {e}")
 
     return strikes
 
 def fetch_cgsse_blackouts():
-    print("Tentativo di estrazione sospensioni da CGSSE...")
+    print("Tentativo di verifica delibere su CGSSE...")
     events = []
     try:
         resp = requests.get(CGSSE_CALENDAR_URL, headers=HEADERS, timeout=15)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, "html.parser")
-            # Estrazione testuale di date in formato DD/MM/YYYY associate a periodi di franchigia o blocco
-            text_blocks = soup.find_all(text=re.compile(r"franchigia|sospensione", re.IGNORECASE))
+            text_blocks = soup.find_all(string=re.compile(r"franchigia|sospensione", re.IGNORECASE))
             for t in text_blocks:
                 parent_text = t.parent.get_text() if t.parent else ""
                 dates_found = re.findall(r"\b(\d{2}/\d{2}/\d{4})\b", parent_text)
@@ -99,23 +123,23 @@ def fetch_cgsse_blackouts():
                             "tipo": "istituzionale"
                         })
     except Exception as e:
-        print(f"Nota: recupero CGSSE non critico completato con fallback: {e}")
+        print(f"Verifica CGSSE online terminata con fallback locale: {e}")
     return events
 
 def build_blackout_windows():
-    print("Costruzione finestre di blocco ex Art. 8...")
+    print("Elaborazione finestre di franchigia istituzionale (Art. 8)...")
     config_path = os.path.join(CONFIG_DIR, "blackout_dates.json")
     all_events = []
 
-    # 1. Carica eventi da config/blackout_dates.json
+    # 1. Carica le date da config/blackout_dates.json
     if os.path.exists(config_path):
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 all_events.extend(json.load(f))
         except Exception as e:
-            print(f"Errore lettura blackout_dates.json: {e}")
+            print(f"Errore nella lettura di blackout_dates.json: {e}")
 
-    # 2. Aggiunge eventi rilevati da CGSSE
+    # 2. Aggiunge eventuali date rilevate da CGSSE
     online_events = fetch_cgsse_blackouts()
     known_dates = {ev["date"] for ev in all_events}
     for o_ev in online_events:
@@ -124,7 +148,7 @@ def build_blackout_windows():
             known_dates.add(o_ev["date"])
 
     windows = []
-    # 3. Calcola l'estensione dell'Art. 8: 3 giorni prima e 3 giorni dopo
+    # 3. Calcolo dell'intervallo dell'Art. 8 (-3 giorni / +3 giorni)
     for ev in all_events:
         try:
             base_d = datetime.strptime(ev["date"], "%Y-%m-%d").date()
@@ -140,7 +164,7 @@ def build_blackout_windows():
                 "riferimento": "Art. 8 Del. 01/92 (-3/+3 gg)"
             })
         except Exception as err:
-            print(f"Errore elaborazione data {ev}: {err}")
+            print(f"Errore calcolo date per {ev}: {err}")
 
     return windows
 
@@ -148,22 +172,24 @@ def main():
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(CONFIG_DIR, exist_ok=True)
 
-    # Aggiorna scioperi
+    # 1. Pipeline Scioperi
     strikes = fetch_mit_strikes()
     strikes_payload = {
         "last_sync": datetime.now().isoformat(),
         "total_records": len(strikes),
         "strikes": strikes
     }
-    with open(os.path.join(DATA_DIR, "scioperi.json"), "w", encoding="utf-8") as f:
+    strikes_file = os.path.join(DATA_DIR, "scioperi.json")
+    with open(strikes_file, "w", encoding="utf-8") as f:
         json.dump(strikes_payload, f, ensure_ascii=False, indent=2)
 
-    # Aggiorna blackout windows
+    # 2. Pipeline Franchigie
     blackouts = build_blackout_windows()
-    with open(os.path.join(DATA_DIR, "blackout_windows.json"), "w", encoding="utf-8") as f:
+    blackouts_file = os.path.join(DATA_DIR, "blackout_windows.json")
+    with open(blackouts_file, "w", encoding="utf-8") as f:
         json.dump(blackouts, f, ensure_ascii=False, indent=2)
 
-    print("Pipeline sincronizzazione completata con successo.")
+    print(f"Pipeline completata: salvati {len(strikes)} scioperi e {len(blackouts)} finestre di blocco.")
 
 if __name__ == "__main__":
     main()
