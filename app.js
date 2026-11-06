@@ -26,23 +26,53 @@ function checkFranchigia(targetDate) {
   const m = targetDate.getMonth();
   const d = targetDate.getDate();
 
+  // 18 Dicembre - 7 Gennaio
   if ((m === 11 && d >= 18) || (m === 0 && d <= 7)) {
-    return { blocked: true, name: "Franchigia Natale / Capodanno / Epifania", interval: "18 Dicembre – 7 Gennaio", ref: "Art. 8 Del. 01/92" };
+    return { 
+      blocked: true, 
+      name: "Franchigia Natale / Capodanno / Epifania", 
+      interval: "18 Dicembre – 7 Gennaio", 
+      ref: "Art. 8 Del. 01/92" 
+    };
   }
+  // 24 Aprile - 2 Maggio
   if ((m === 3 && d >= 24) || (m === 4 && d <= 2)) {
-    return { blocked: true, name: "Franchigia Festa della Liberazione e 1° Maggio", interval: "24 Aprile – 2 Maggio", ref: "Art. 8 Del. 01/92" };
+    return { 
+      blocked: true, 
+      name: "Franchigia Festa della Liberazione e 1° Maggio", 
+      interval: "24 Aprile – 2 Maggio", 
+      ref: "Art. 8 Del. 01/92" 
+    };
   }
+  // 27 Giugno - 4 Luglio
   if ((m === 5 && d >= 27) || (m === 6 && d <= 4)) {
-    return { blocked: true, name: "Franchigia Inizio Estate / Punte di Traffico", interval: "27 Giugno – 4 Luglio", ref: "Art. 8 Del. 01/92" };
+    return { 
+      blocked: true, 
+      name: "Franchigia Inizio Estate / Punte di Traffico", 
+      interval: "27 Giugno – 4 Luglio", 
+      ref: "Art. 8 Del. 01/92" 
+    };
   }
+  // 27 Luglio - 5 Settembre
   if ((m === 6 && d >= 27) || m === 7 || (m === 8 && d <= 5)) {
-    return { blocked: true, name: "Franchigia Esodo Estivo", interval: "27 Luglio – 5 Settembre", ref: "Art. 8 Del. 01/92" };
+    return { 
+      blocked: true, 
+      name: "Franchigia Esodo Estivo", 
+      interval: "27 Luglio – 5 Settembre", 
+      ref: "Art. 8 Del. 01/92" 
+    };
   }
+  // 30 Ottobre - 5 Novembre
   if ((m === 9 && d >= 30) || (m === 10 && d <= 5)) {
-    return { blocked: true, name: "Franchigia Ponte di Ognissanti e Commemorazione Defunti", interval: "30 Ottobre – 5 Novembre", ref: "Art. 8 Del. 01/92" };
+    return { 
+      blocked: true, 
+      name: "Franchigia Ponte di Ognissanti e Commemorazione Defunti", 
+      interval: "30 Ottobre – 5 Novembre", 
+      ref: "Art. 8 Del. 01/92" 
+    };
   }
 
-  // Pasqua: da giovedì precedente a giovedì successivo
+  // Pasqua mobile: dal giovedì precedente al giovedì successivo
   const easter = getEaster(y);
   const thuBefore = new Date(easter);
   thuBefore.setDate(easter.getDate() - 3);
@@ -52,11 +82,18 @@ function checkFranchigia(targetDate) {
   if (targetDate >= thuBefore && targetDate <= thuAfter) {
     const fmtStart = thuBefore.toLocaleDateString("it-IT");
     const fmtEnd = thuAfter.toLocaleDateString("it-IT");
-    return { blocked: true, name: "Franchigia Pasquale mobile", interval: `dal ${fmtStart} al ${fmtEnd}`, ref: "Art. 8 Del. 01/92" };
+    return { 
+      blocked: true, 
+      name: "Franchigia Pasquale mobile", 
+      interval: `dal ${fmtStart} al ${fmtEnd}`, 
+      ref: "Art. 8 Del. 01/92" 
+    };
   }
 
-  // Franchigie Istituzionali / Consultazioni (±3 giorni dall'evento)
-  const targetIso = targetDate.toISOString().split("T")[0];
+  // Franchigie Istituzionali / Consultazioni (±3 giorni dall'evento ex Art. 8)
+  const pad = (n) => String(n).padStart(2, "0");
+  const targetIso = `${targetDate.getFullYear()}-${pad(targetDate.getMonth() + 1)}-${pad(targetDate.getDate())}`;
+
   for (const win of blackoutWindows) {
     if (targetIso >= win.blocco_inizio && targetIso <= win.blocco_fine) {
       return {
@@ -71,15 +108,16 @@ function checkFranchigia(targetDate) {
   return { blocked: false };
 }
 
-// 3. Calcolo giorni liberi (esclude giorno iniziale e finale)
+// 3. Calcolo giorni liberi puro basato su date solari YYYY-MM-DD
+// Formula: esclude sia il giorno di partenza che quello di arrivo
 function getFreeDays(d1, d2) {
-  const t1 = new Date(d1.getFullYear(), d1.getMonth(), d1.getDate()).getTime();
-  const t2 = new Date(d2.getFullYear(), d2.getMonth(), d2.getDate()).getTime();
-  const diffDays = Math.floor(Math.abs(t2 - t1) / (24 * 60 * 60 * 1000));
+  const utc1 = Date.UTC(d1.getFullYear(), d1.getMonth(), d1.getDate());
+  const utc2 = Date.UTC(d2.getFullYear(), d2.getMonth(), d2.getDate());
+  const diffDays = Math.floor(Math.abs(utc2 - utc1) / (24 * 60 * 60 * 1000));
   return Math.max(0, diffDays - 1);
 }
 
-// 4. Motore di Valutazione e Spiegazione Normativa
+// 4. Motore di Valutazione Normativa Completo
 function evaluateDay(targetDate, proclamationDate, actionType) {
   const result = {
     date: targetDate,
@@ -88,20 +126,24 @@ function evaluateDay(targetDate, proclamationDate, actionType) {
     reasons: [],
     recommendedHours: actionType === "first"
       ? "4 Ore (es. 13:00 - 17:00, al di fuori delle fasce di garanzia)"
-      : "24 Ore (dalle 00:01 alle 23:59 con rispetto integrale delle fasce di garanzia)"
+      : "24 Ore (dalle 00:01 alle 23:59, con fasce di garanzia 07-10 e 18-21 tutelate)"
   };
 
-  const targetIso = targetDate.toISOString().split("T")[0];
+  const pad = (n) => String(n).padStart(2, "0");
+  const targetIso = `${targetDate.getFullYear()}-${pad(targetDate.getMonth() + 1)}-${pad(targetDate.getDate())}`;
 
   // A. PREAVVISO MINIMO E MASSIMO (Artt. 4 e 5)
-  const diffFromProclamation = Math.floor((targetDate - proclamationDate) / (24 * 60 * 60 * 1000));
+  const utcTarget = Date.UTC(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+  const utcProc = Date.UTC(proclamationDate.getFullYear(), proclamationDate.getMonth(), proclamationDate.getDate());
+  const diffFromProclamation = Math.floor((utcTarget - utcProc) / (24 * 60 * 60 * 1000));
+
   if (diffFromProclamation < 11) {
     result.status = "RED";
     result.reasons.push({
       type: "fail",
       title: "Preavviso di legge insufficiente",
       law: "Art. 4 Del. 01/92 e Art. 2 c. 1 L. 146/90",
-      description: `Tra la data di proclamazione e la data dello sciopero intercorrono solo ${Math.max(0, diffFromProclamation)} giorni. La norma impone un preavviso minimo di 10 giorni liberi (nel computo è escluso il giorno iniziale di invio).`
+      description: `Tra la proclamazione e lo sciopero intercorrono solo ${Math.max(0, diffFromProclamation)} giorni. La norma impone un preavviso minimo di 10 giorni liberi (escluso il giorno di invio).`
     });
   } else if (diffFromProclamation > 45) {
     result.status = "RED";
@@ -114,9 +156,9 @@ function evaluateDay(targetDate, proclamationDate, actionType) {
   } else {
     result.reasons.push({
       type: "ok",
-      title: "Termini di preavviso regolari",
+      title: "Termini di preavviso conformi",
       law: "Artt. 4 e 5 Del. 01/92",
-      description: `Preavviso di ${diffFromProclamation} giorni conforme (finestra consentita: 10–45 giorni).`
+      description: `Preavviso di ${diffFromProclamation} giorni conforme alla legge (finestra ammessa: 10–45 giorni).`
     });
   }
 
@@ -128,53 +170,60 @@ function evaluateDay(targetDate, proclamationDate, actionType) {
       type: "fail",
       title: `Blocco per ${franchigia.name}`,
       law: franchigia.ref,
-      description: `Periodo di franchigia assoluta (${franchigia.interval}). In queste date la legge vieta tassativamente qualsiasi azione di sciopero nel trasporto aereo a tutela della mobilità dei cittadini.`
+      description: `Periodo di franchigia assoluta (${franchigia.interval}). In queste date la legge vieta qualsiasi azione di sciopero nel trasporto aereo a tutela della mobilità dei cittadini.`
     });
   } else {
     result.reasons.push({
       type: "ok",
-      title: "Nessuna franchigia attiva",
+      title: "Nessuna franchigia di calendario",
       law: "Art. 8 Del. 01/92",
-      description: "La data non coincide con ponti festivi, esodi estivi, festività natalizie o consultazioni."
+      description: "La data non coincide con ponti festivi, esodi estivi, festività natalizie o finestre istituzionali."
     });
   }
 
-  // C. VERIFICA CONFLITTI CON SCIOPERI AEREI GIÀ PROCLAMATI
+  // C. CONTROLLO TUTTI GLI SCIOPERI AEREI (CONCOMITANZA E RAREFAZIONE 10 GG)
   const aereoStrikes = strikesData.filter(s => s.settore === "AEREO");
 
   for (const s of aereoStrikes) {
-    const sDate = new Date(s.date);
+    const sParts = s.date.split("-").map(Number);
+    const sDate = new Date(sParts[0], sParts[1] - 1, sParts[2]);
     const sIso = s.date;
 
     // 1. Concomitanza diretta (stesso identico giorno)
     if (targetIso === sIso) {
       result.status = "RED";
-      const isEnav = s.ambito.toLowerCase().includes("enav") || s.ambito.toLowerCase().includes("assistenza al volo");
+      if (!result.blockingStrikes.some(b => b.date === s.date && b.ambito === s.ambito)) {
+        result.blockingStrikes.push(s);
+      }
+
+      const isEnav = (s.ambito || "").toLowerCase().includes("enav") || (s.ambito || "").toLowerCase().includes("assistenza al volo");
       const lawRef = isEnav 
         ? "Art. 17 Del. 01/92 e Delibera CGSSE 25/01/2007 (Divieto concentrazione assistenza volo)" 
         : "Art. 16 Del. 01/92 (Concomitanza sullo stesso bacino passeggeri)";
-      
-      result.blockingStrikes.push(s);
+
       result.reasons.push({
         type: "fail",
         title: `Concomitanza diretta con sciopero: ${s.ambito}`,
         law: lawRef,
-        description: `È già proclamato uno sciopero aereo in questa data (${s.sindacato}). ${isEnav ? "La Commissione di Garanzia vieta la contemporaneità tra personale di volo di un vettore e addetti al controllo del volo ENAV poiché crea paralisi totale del traffico aereo." : "Vietata la concentrazione se produce grave pregiudizio agli utenti."}`
+        description: `È già proclamato uno sciopero del settore aereo in questa data (${s.sindacato}). ${isEnav ? "La Commissione di Garanzia vieta la contemporaneità tra personale di un vettore e addetti al controllo di volo ENAV per prevenire la paralisi totale dello spazio aereo." : "Vietata la concentrazione di azioni di sciopero se produce grave pregiudizio agli utenti."}`
       });
       continue;
     }
 
-    // 2. Rarefazione oggettiva 10 giorni liberi (Art. 16)
+    // 2. Rarefazione oggettiva: devono esserci almeno 10 giorni liberi
     const freeDays = getFreeDays(targetDate, sDate);
     if (freeDays < 10) {
       result.status = "RED";
-      result.blockingStrikes.push(s);
+      if (!result.blockingStrikes.some(b => b.date === s.date && b.ambito === s.ambito)) {
+        result.blockingStrikes.push(s);
+      }
+
       const isBefore = targetDate < sDate;
       result.reasons.push({
         type: "fail",
         title: `Violazione Rarefazione Oggettiva rispetto a: ${s.ambito}`,
         law: "Art. 16 Del. 01/92",
-        description: `Tra questa data e lo sciopero aereo già fissato per il ${s.date} (${s.sindacato}) ci sono solo ${freeDays} giorni liberi. L'Art. 16 impone che tra due scioperi incidenti sullo stesso bacino di utenza trascorrano almeno 10 giorni liberi interi (${isBefore ? "troppo vicino prima" : "troppo vicino dopo"}).`
+        description: `Tra il ${targetIso} e lo sciopero aereo già proclamato per il ${s.date} (${s.sindacato}) ci sono solo ${freeDays} giorni liberi (${isBefore ? "antecedenti" : "successivi"}). L'Art. 16 prescrive un intervallo minimo inderogabile di 10 giorni liberi interi.`
       });
     }
   }
@@ -183,12 +232,14 @@ function evaluateDay(targetDate, proclamationDate, actionType) {
   const intermodalStrikes = strikesData.filter(s => s.settore === "INTERMODALE");
   const intermodalCollision = intermodalStrikes.find(s => s.date === targetIso);
   if (intermodalCollision) {
-    if (result.status !== "RED") result.status = "YELLOW";
+    if (result.status !== "RED") {
+      result.status = "YELLOW";
+    }
     result.reasons.push({
       type: "warn",
-      title: `Attenzione: Sciopero concomitante in altro trasporto (${intermodalCollision.ambito})`,
-      law: "Art. 12 Del. 01/92 (Divieto di contemporaneità intermodale)",
-      description: `È presente uno sciopero nel settore ferroviario o del trasporto pubblico locale indetto da ${intermodalCollision.sindacato}. L'Art. 12 vieta lo sciopero aereo se coincide negli stessi giorni ed orari. È necessario calibrare la fascia oraria per evitare sovrapposizioni.`
+      title: `Attenzione: Sciopero concomitante ${intermodalCollision.ambito}`,
+      law: "Art. 12 Del. 01/92 (Divieto contemporaneità intermodale)",
+      description: `Rilevato sciopero nei trasporti ferroviari o TPL indetto da ${intermodalCollision.sindacato}. L'Art. 12 vieta la coincidenza negli stessi orari: calibrare l'astensione per evitare sovrapposizioni.`
     });
   }
 
@@ -203,7 +254,7 @@ function evaluateDay(targetDate, proclamationDate, actionType) {
   return result;
 }
 
-// Inizializzazione Applicazione
+// 5. Inizializzazione Applicazione
 async function init() {
   const statusEl = document.getElementById("sync-status");
 
@@ -213,7 +264,7 @@ async function init() {
     strikesData = jsonStrikes.strikes || [];
     if (jsonStrikes.last_sync) {
       const syncDate = new Date(jsonStrikes.last_sync).toLocaleDateString("it-IT");
-      statusEl.innerText = `Aggiornato al: ${syncDate} (${strikesData.length} scioperi rilevati)`;
+      statusEl.innerText = `Aggiornato al: ${syncDate} (${strikesData.length} scioperi archiviati)`;
     }
   } catch (err) {
     console.warn("Impossibile caricare data/scioperi.json:", err);
@@ -317,10 +368,10 @@ function displayDetails(evalData) {
 
   html += `<p class="rec-hours"><strong>Formato Azione Consigliato:</strong> ${evalData.recommendedHours}</p>`;
 
-  // SEZIONE SCIOPERI IMPEDITIVI
+  // Sezione riepilogo scioperi bloccanti
   if (evalData.blockingStrikes.length > 0) {
     html += `<div class="blocking-strikes-box">
-      <h4>Scioperi già presenti che impediscono questa data:</h4>
+      <h4>Scioperi già proclamati che bloccano questa data:</h4>
       <ul>`;
     evalData.blockingStrikes.forEach(s => {
       html += `<li><strong>${s.date}</strong> — <em>${s.ambito}</em> (${s.sindacato}) [Fonte: ${s.fonte}]</li>`;
