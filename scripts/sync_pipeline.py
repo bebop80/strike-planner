@@ -2,8 +2,14 @@ import os
 import re
 import json
 from datetime import datetime, timedelta
+import urllib3
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
+
+# Disabilita i warning per certificati non verificati sui portali PA
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.join(BASE_DIR, "..")
@@ -14,10 +20,11 @@ MIT_URL = "https://scioperi.mit.gov.it/mit2/public/scioperi"
 CGSSE_CALENDAR_URL = "https://www.cgsse.it/calendario-scioperi"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7"
 }
 
-# Parole chiave estese per catturare tutti gli scioperi del settore aereo/assistenza/aeroporti
 AEREO_KEYWORDS = [
     "aereo", "aerea", "aerei", "aviazione", "enav", 
     "assistenza al volo", "navigazione aerea", "aeroportual", 
@@ -25,39 +32,49 @@ AEREO_KEYWORDS = [
     "assistenti di volo", "cgsse", "enac"
 ]
 
-# Parole chiave per la concomitanza intermodale (Art. 12)
 INTERMODAL_KEYWORDS = [
     "ferrovi", "treni", "trenitalia", "italo", 
     "tpl", "autoferro", "trasporto pubblico locale", 
     "marittim", "traghetti"
 ]
 
+def get_robust_session():
+    session = requests.Session()
+    retries = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[500, 502, 503, 504]
+    )
+    adapter = HTTPAdapter(max_retries=retries)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+    return session
+
 def parse_date(date_str):
     if not date_str:
         return None
-    # Intercetta formati DD/MM/YYYY, DD-MM-YYYY, DD.MM.YYYY o YYYY-MM-DD
     match = re.search(r"(\d{2})[/.-](\d{2})[/.-](\d{4})", date_str)
     if match:
         day, month, year = match.groups()
         return f"{year}-{month}-{day}"
-    
     match_iso = re.search(r"(\d{4})[/.-](\d{2})[/.-](\d{2})", date_str)
     if match_iso:
         year, month, day = match_iso.groups()
         return f"{year}-{month}-{day}"
     return None
 
-def fetch_mit_strikes():
+def fetch_mit_strikes(session):
     print("Avvio interrogazione Cruscotto MIT...")
     strikes = []
     try:
-        resp = requests.get(MIT_URL, headers=HEADERS, timeout=25)
+        # verify=False gestisce eventuali handshake SSL bloccanti della PA
+        resp = session.get(MIT_URL, headers=HEADERS, timeout=12, verify=False)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
         table = soup.find("table")
         if not table:
-            print("Nessuna tabella trovata sulla pagina MIT.")
-            return strikes
+            print("Tabella MIT non individuata.")
+            return None
 
         rows = table.find_all("tr")[1:]
         for row in rows:
@@ -75,7 +92,6 @@ def fetch_mit_strikes():
                 if not p_start:
                     continue
 
-                # Controllo prioritario comparto AEREO (sia sul settore che sul testo dell'ambito aziendale)
                 is_aereo = any(k in settore for k in AEREO_KEYWORDS) or any(k in ambito_lower for k in AEREO_KEYWORDS)
 
                 if is_aereo:
@@ -96,17 +112,17 @@ def fetch_mit_strikes():
                         "sindacato": sindacati,
                         "fonte": "MIT"
                     })
-        print(f"Estratti {len(strikes)} scioperi rilevanti dal MIT.")
+        print(f"Estratti con successo {len(strikes)} scioperi dal MIT.")
+        return strikes
     except Exception as e:
-        print(f"Errore durante la lettura dal MIT: {e}")
+        print(f"Avviso: Connessione al MIT non riuscita (timeout/geoblock): {e}")
+        return None
 
-    return strikes
-
-def fetch_cgsse_blackouts():
-    print("Tentativo di verifica delibere su CGSSE...")
+def fetch_cgsse_blackouts(session):
+    print("Verifica delibere su CGSSE (SSL bypass attivo)...")
     events = []
     try:
-        resp = requests.get(CGSSE_CALENDAR_URL, headers=HEADERS, timeout=15)
+        resp = session.get(CGSSE_CALENDAR_URL, headers=HEADERS, timeout=10, verify=False)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, "html.parser")
             text_blocks = soup.find_all(string=re.compile(r"franchigia|sospensione", re.IGNORECASE))
@@ -123,24 +139,22 @@ def fetch_cgsse_blackouts():
                             "tipo": "istituzionale"
                         })
     except Exception as e:
-        print(f"Verifica CGSSE online terminata con fallback locale: {e}")
+        print(f"Verifica CGSSE online non disponibile (verrà usato config locale): {e}")
     return events
 
-def build_blackout_windows():
+def build_blackout_windows(session):
     print("Elaborazione finestre di franchigia istituzionale (Art. 8)...")
     config_path = os.path.join(CONFIG_DIR, "blackout_dates.json")
     all_events = []
 
-    # 1. Carica le date da config/blackout_dates.json
     if os.path.exists(config_path):
         try:
             with open(config_path, "r", encoding="utf-8") as f:
                 all_events.extend(json.load(f))
         except Exception as e:
-            print(f"Errore nella lettura di blackout_dates.json: {e}")
+            print(f"Errore lettura blackout_dates.json: {e}")
 
-    # 2. Aggiunge eventuali date rilevate da CGSSE
-    online_events = fetch_cgsse_blackouts()
+    online_events = fetch_cgsse_blackouts(session)
     known_dates = {ev["date"] for ev in all_events}
     for o_ev in online_events:
         if o_ev["date"] not in known_dates:
@@ -148,7 +162,6 @@ def build_blackout_windows():
             known_dates.add(o_ev["date"])
 
     windows = []
-    # 3. Calcolo dell'intervallo dell'Art. 8 (-3 giorni / +3 giorni)
     for ev in all_events:
         try:
             base_d = datetime.strptime(ev["date"], "%Y-%m-%d").date()
@@ -171,25 +184,47 @@ def build_blackout_windows():
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
     os.makedirs(CONFIG_DIR, exist_ok=True)
+    session = get_robust_session()
 
-    # 1. Pipeline Scioperi
-    strikes = fetch_mit_strikes()
+    strikes_file = os.path.join(DATA_DIR, "scioperi.json")
+    
+    # 1. Carica i dati attuali esistenti (per non azzerarli in caso di timeout della rete)
+    existing_strikes = []
+    if os.path.exists(strikes_file):
+        try:
+            with open(strikes_file, "r", encoding="utf-8") as f:
+                old_payload = json.load(f)
+                existing_strikes = old_payload.get("strikes", [])
+        except Exception:
+            existing_strikes = []
+
+    # 2. Esecuzione scraping MIT
+    new_strikes = fetch_mit_strikes(session)
+    
+    if new_strikes is not None and len(new_strikes) > 0:
+        # Se la rete risponde, salviamo i nuovi dati
+        final_strikes = new_strikes
+        print(f"Aggiornato database con {len(final_strikes)} record online dal MIT.")
+    else:
+        # Se il server MIT va in timeout (es. da Codespaces estero), manteniamo la cache
+        final_strikes = existing_strikes
+        print(f"Mantenuta cache locale esistente ({len(final_strikes)} scioperi preservati).")
+
     strikes_payload = {
         "last_sync": datetime.now().isoformat(),
-        "total_records": len(strikes),
-        "strikes": strikes
+        "total_records": len(final_strikes),
+        "strikes": final_strikes
     }
-    strikes_file = os.path.join(DATA_DIR, "scioperi.json")
     with open(strikes_file, "w", encoding="utf-8") as f:
         json.dump(strikes_payload, f, ensure_ascii=False, indent=2)
 
-    # 2. Pipeline Franchigie
-    blackouts = build_blackout_windows()
+    # 3. Aggiorna finestre franchigia
+    blackouts = build_blackout_windows(session)
     blackouts_file = os.path.join(DATA_DIR, "blackout_windows.json")
     with open(blackouts_file, "w", encoding="utf-8") as f:
         json.dump(blackouts, f, ensure_ascii=False, indent=2)
 
-    print(f"Pipeline completata: salvati {len(strikes)} scioperi e {len(blackouts)} finestre di blocco.")
+    print(f"Esecuzione terminata. Scioperi memorizzati: {len(final_strikes)}.")
 
 if __name__ == "__main__":
     main()
